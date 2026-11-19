@@ -37,6 +37,19 @@ const deps: WorkerDeps = {
 };
 log(`start; modeladapter=${adapter.name}${adapter.isMock ? ' (MOCK — geen taalmodel, geen kosten)' : ''}; max ${maxRuns} modelruns tegelijk`);
 
+// Seed schedules that must exist for the worker to function.
+await (async () => {
+  const workspaces = await db.workspace.findMany({ select: { id: true, reportingTimezone: true } });
+  for (const ws of workspaces) {
+    await db.schedule.upsert({
+      where: { workspaceId_key: { workspaceId: ws.id, key: 'cs_medewerker' } },
+      create: { workspaceId: ws.id, key: 'cs_medewerker', kind: 'task', label: 'CS Medewerker', timeOfDay: '00:00', weekdays: [1,2,3,4,5,6,7], timezone: 'Europe/Amsterdam', graceMinutes: 5, maxCatchUpMinutes: 30 },
+      update: {},
+    });
+  }
+  log('schema\'s geseeed');
+})();
+
 const boss = new PgBoss(process.env.DATABASE_URL!);
 boss.on('error', (e: unknown) => log('pg-boss fout', { error: String(e) }));
 await boss.start();
