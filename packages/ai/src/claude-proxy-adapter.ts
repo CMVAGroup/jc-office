@@ -34,8 +34,15 @@ export class ClaudeProxyModelAdapter implements ModelAdapter {
     try { json = await response.json(); } catch { throw new Error('Claude-proxy gaf geen geldige JSON terug.'); }
     const content = (json as { choices: { message: { content: string } }[] }).choices?.[0]?.message?.content;
     if (typeof content !== 'string') throw new Error('Claude-proxy gaf geen geldig chatbericht terug.');
+    // Claude CLI wraps JSON in markdown code fences; strip them before parsing.
+    let text = content.trim();
+    const fence = text.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/);
+    if (fence) text = fence[1].trim();
+    // Extract first JSON object/array if there's surrounding text.
+    const jsonMatch = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+    if (jsonMatch) text = jsonMatch[1];
     let output: unknown;
-    try { output = JSON.parse(content); } catch { throw new Error('Claude-proxy-uitvoer is geen geldige JSON.'); }
+    try { output = JSON.parse(text); } catch { throw new Error('Claude-proxy-uitvoer is geen geldige JSON.'); }
     return { output, provider: 'claude-proxy', model: this.model, usage: { inputTokens: 0, outputTokens: 0, costUsdMicros: 0 } };
   }
 }
