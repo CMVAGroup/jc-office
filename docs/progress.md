@@ -1,3 +1,28 @@
+# Claude Code HTTP-wrapper — fase 9, 19 november 2026
+
+- packages/claude-proxy: zelfstandige TypeScript/ESM HTTP-server met
+  POST /v1/chat/completions, geordende tekstprompt en OpenAI-chatcompletion.
+- claude -p <prompt> via execFile zonder shell; tools/MCP/hooks uit,
+  geen user/project-settings of sessieopslag. Geen agenttoolrechten aangepast.
+- Validatie, veilige fouten, 64 KiB invoer, 1 MiB uitvoer, 120 s timeout,
+  maximaal één actieve call en annulering bij clientdisconnect.
+- Compose: 127.0.0.1:11435, intern http://claude-proxy:11435 op frontend;
+  eigen Dockerfile met CLI, non-root, healthcheck en geen hostmounts.
+- .env.example: CLAUDE_PROXY_ENABLED=false en MODEL_PROVIDER=claude-proxy.
+  CLI-auth niet ingericht. Worker heeft nog geen claude-proxy-adapter en valt
+  voor deze provider terug op mock; vervolgintegratie buiten Phase 9 gehouden.
+- Alle 73 unittests, 10 pakkettypechecks, native Node-runtime-smoke en
+  Compose config --quiet met synthetische waarden geslaagd.
+- Claude CLI/Docker-engine niet lokaal beschikbaar: echte modelcall,
+  imagebuild/containerstart en live auth niet geverifieerd. Geen DB-/UI-wijziging;
+  DB-/browserintegratietests niet uitgevoerd. Typecheck wijzigde gegenereerd
+  apps/web/tsconfig.tsbuildinfo; buiten de commit gehouden.
+- Alleen in de opgegeven projectmap gewerkt. Bestaande lokale wijzigingen
+  behouden. Geen echte .env/loginbestanden gelezen, secrets, VPS-acties of deploy.
+  Zie packages/claude-proxy/README.md. Gestopt na fase 9.
+
+---
+
 # Deploychecklist en owner-CLI — 19 november 2026
 
 Lokale broncontrole uitgevoerd; geen echte .env gelezen of aangepast, geen
