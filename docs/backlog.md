@@ -1,5 +1,12 @@
 # Gefaseerde backlog met acceptatiecriteria
 
+## Agentrolkennis — fase 7
+
+- [x] Secties 3.1 t/m 3.11 als meeleverbare, gehashte bronbundel en workspacegebonden draft-seed voorbereid.
+- [x] Typecheck, vijf lokale unitchecks en databasevrije dry-run geslaagd.
+- [ ] Seed expliciet uitvoeren in de gekozen bestaande workspace en items door eigenaar laten beoordelen.
+- [ ] Echte PostgreSQL-import en idempotentie verifiëren; geen nieuwe rollen/toolrechten automatisch activeren.
+
 ## Nieuwe prioriteit — cmva als databron (eigenaarbesluit 19-11-2026)
 
 - [x] CMVA-client, Zod-responscontract, veilige foutclassificatie en echte GET-probe.

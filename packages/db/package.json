@@ -13,7 +13,8 @@
     "migrate:deploy": "prisma migrate deploy",
     "seed": "tsx src/seed.ts",
     "reset": "prisma migrate reset --force && tsx src/seed.ts",
-    "owner:create": "tsx src/create-owner.ts"
+    "owner:create": "tsx src/create-owner.ts",
+    "knowledge:seed-roles": "tsx src/seed-agent-roles.ts"
   },
   "dependencies": {
     "@jc/connectors": "workspace:*",

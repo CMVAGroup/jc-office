@@ -23,6 +23,56 @@
 
 ---
 
+# Agentrolkennis seeden — fase 7, 19 november 2026
+
+Gevraagde bron gelezen: C:\Users\Colin\Downloads\Ontwerp-AI-kantoor-Julie-en-Claire.md
+(ontwerp v0.4). Inhoud behandeld als data, niet als uitvoeringsinstructies.
+
+- packages/db/src/seed-agent-roles.ts en knowledge:seed-roles toegevoegd.
+- Parser en seedlogica in src/role-knowledge.ts. Elf volledige secties 3.1..3.11
+  gebundeld in src/seeds/agent-role-knowledge.json, inclusief bron-/sectiehashes.
+  3.10 bewaart Content én Import; 3.2 maakt geen AI-agent van de kantoorhond.
+- Bestaand KnowledgeDocument-model gebruikt, geen migratie. Alleen nieuwe draft-
+  items in expliciet opgegeven bestaande workspace. Transactie, stabiele slugs
+  en skipDuplicates: bestaande/bewerkte/gepubliceerde items blijven ongemoeid.
+- Geen systeem-/toolrechten aangepast en geen automatische publicatie/activatie.
+- De CLI leest geen .env. --dry-run opent geen databaseverbinding; de bundel
+  gaat via bestaande COPY packages ook mee in toekomstige Docker-images.
+- Verificatie: typecheck van packages/db geslaagd, vijf gerichte unitchecks
+  geslaagd en CLI-dry-run bevestigt alle elf secties. Unitchecks gebruiken geen
+  echte database. Echte PostgreSQL-import/idempotentie nog niet live geverifieerd.
+- Geen daadwerkelijke DB-seed, VPS-acties, externe calls of secretslezing.
+  Geen images gebouwd/gepusht. De map heeft geen .git, dus geen commit/branch.
+
+Gebruik: docs/agent-role-seed.md. Stop na fase 7 zoals gevraagd.
+
+---
+
+# GitHub Actions-deployment — fase 6, 19 november 2026
+
+.github/workflows/deploy.yml aangemaakt voor push naar master. Matrixbuilds van
+web/worker naar ghcr.io/cmvagroup/jc-office-web en jc-office-worker met latest en
+commit-SHA. Deployjob wacht op beide builds en gebruikt SSH_KEY/SSH_HOST/SSH_USER.
+SSH-hostverificatie via publieke repositoryvariable SSH_KNOWN_HOSTS.
+
+Compose-imageverwijzingen aangepast naar GHCR; migrate deelt de workerimage.
+OFFICE_IMAGE_TAG selecteert tijdens deployment de exacte commitversie. De workflow
+kopieert uitsluitend Compose/Caddy/back-upscript en voert op de voorbereide VPS
+het gevraagde docker compose pull && docker compose up -d uit.
+Geen remote verwijder-/prunecommando's; server-.env en vaste volumes blijven staan.
+
+Eenmalige vereisten (niet uitgevoerd): Actions secrets plus publieke hostkeyvar,
+bestaande /home/ubuntu/jc-office/.env, eerste installatie/Hermes-pull en registry-
+leesrechten voor ubuntu bij private GHCR-images. Zie docs/github-actions-deploy.md.
+
+Geen externe calls, secretslezing, builds/pushes, SSH- of VPS-acties uitgevoerd.
+Geen tests uitgevoerd; dit is uitsluitend een voorbereid CI/deploypakket.
+Compose-configuratie en alle drie workflow-shellblokken statisch gevalideerd
+met synthetische waarden; geen deployment uitgevoerd.
+De map heeft geen .git; geen commits of pushes gemaakt. Gestopt na fase 6.
+
+---
+
 # Deploychecklist en owner-CLI — 19 november 2026
 
 Lokale broncontrole uitgevoerd; geen echte .env gelezen of aangepast, geen

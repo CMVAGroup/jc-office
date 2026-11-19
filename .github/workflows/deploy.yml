@@ -1,0 +1,131 @@
+name: Build and deploy AI Office
+
+on:
+  push:
+    branches: [master]
+
+# Eén deployment tegelijk; een lopende rollout niet onderbreken.
+concurrency:
+  group: jc-office-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and push ${{ matrix.app }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [web, worker]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/cmvagroup/jc-office-${{ matrix.app }}:${{ github.sha }}
+            ghcr.io/cmvagroup/jc-office-${{ matrix.app }}:latest
+          cache-from: type=gha,scope=jc-office-${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=jc-office-${{ matrix.app }}
+
+  deploy:
+    name: Deploy to VPS
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout deployment files
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          # Openbare, vooraf via een vertrouwd kanaal gecontroleerde hostkeys.
+          SSH_KNOWN_HOSTS: ${{ vars.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_KEY" && test -n "$SSH_HOST" && test -n "$SSH_USER"
+          if [ -z "$SSH_KNOWN_HOSTS" ]; then
+            echo 'Repositoryvariable SSH_KNOWN_HOSTS ontbreekt (geverifieerde publieke hostkey).' >&2
+            exit 1
+          fi
+          # Geen opties, paden of shelltekens in host/gebruikersnaam toelaten.
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]
+          [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          umask 077
+          mkdir -p "$RUNNER_TEMP/jc-office-ssh"
+          printf '%s\n' "$SSH_KEY" > "$RUNNER_TEMP/jc-office-ssh/key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/jc-office-ssh/known_hosts"
+          ssh-keygen -F "$SSH_HOST" -f "$RUNNER_TEMP/jc-office-ssh/known_hosts" > /dev/null
+
+      - name: Transfer deployment configuration and restart services
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ssh_options=(
+            -i "$RUNNER_TEMP/jc-office-ssh/key"
+            -o IdentitiesOnly=yes
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o "UserKnownHostsFile=$RUNNER_TEMP/jc-office-ssh/known_hosts"
+            -o ConnectTimeout=15
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=3
+          )
+          # Vaste map: eenmalig voorbereiden op de VPS, met bestaande private .env.
+          # Geen .env, sleutel, demodata of lokale database overzetten/verwijderen.
+          tar -cf - docker-compose.yml Caddyfile scripts/backup.sh |
+            ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" \
+              'set -eu; cd /home/ubuntu/jc-office; test -f .env; test -r .env; mkdir -p scripts; tar -xf -'
+          ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" bash -s -- "$DEPLOY_SHA" <<'REMOTE'
+          set -euo pipefail
+          cd /home/ubuntu/jc-office
+          export OFFICE_IMAGE_TAG="$1"
+          test -f .env
+          chmod 600 .env
+          docker compose config --quiet
+          # Private GHCR-images vereisen vooraf ingestelde leesrechten voor ubuntu.
+          # De migratieservice gebruikt dezelfde workerimage en start vóór de apps.
+          docker compose pull && docker compose up -d
+          docker compose ps --all
+          REMOTE
+
+      - name: Remove temporary runner SSH files
+        if: always()
+        shell: bash
+        run: |
+          rm -f -- "$RUNNER_TEMP/jc-office-ssh/key" "$RUNNER_TEMP/jc-office-ssh/known_hosts"

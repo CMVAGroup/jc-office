@@ -33,7 +33,7 @@ x-app-env: &app-env
   CMVA_STORE_PROFILE: ${CMVA_STORE_PROFILE:-}
 
 x-worker-image: &worker-image
-  image: jc-office-worker:local
+  image: ghcr.io/cmvagroup/jc-office-worker:${OFFICE_IMAGE_TAG:-latest}
   build:
     context: .
     dockerfile: apps/worker/Dockerfile
@@ -72,7 +72,7 @@ services:
     logging: *logging
 
   web:
-    image: jc-office-web:local
+    image: ghcr.io/cmvagroup/jc-office-web:${OFFICE_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: apps/web/Dockerfile
