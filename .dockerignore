@@ -1,0 +1,37 @@
+# Monorepo-root als buildcontext. Alleen benodigde bronbestanden toelaten.
+**
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.base.json
+!apps/
+!apps/web/
+!apps/web/package.json
+!apps/worker/
+!apps/worker/package.json
+!packages/
+!packages/**
+!scripts/
+!scripts/container-env.mjs
+!scripts/worker-health.mjs
+!apps/web/**
+!apps/worker/**
+# Uitsluitingen blijven gelden na de allowlist.
+**/node_modules
+**/.next
+**/src/generated
+**/test
+**/tests
+**/.git
+**/.env*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*credentials*
+**/*secret*
+**/pgdata*
+**/backups
+**/*.dump
+**/*.log
+**/*.tsbuildinfo

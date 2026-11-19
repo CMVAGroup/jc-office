@@ -1,0 +1,207 @@
+name: jc-office
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-database-env: &database-env
+  PGHOST: postgres
+  PGPORT: "5432"
+  PGUSER: ${POSTGRES_USER:-office}
+  PGPASSWORD: ${POSTGRES_PASSWORD:?Vul POSTGRES_PASSWORD in de server-.env in}
+  PGDATABASE: ${POSTGRES_DB:-jc_office}
+  # De entrypoint maakt DATABASE_URL veilig uit deze velden: postgres:5432.
+
+x-app-env: &app-env
+  <<: *database-env
+  NODE_ENV: production
+  DEMO_MODE: "false"
+  EXTERNAL_WRITES_ENABLED: "false"
+  MODEL_PROVIDER: ${MODEL_PROVIDER:-mock}
+  ALLOW_REAL_MODEL_RUNS: ${ALLOW_REAL_MODEL_RUNS:-false}
+  MODEL_ALIAS: ${MODEL_ALIAS:-}
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-hermes3}
+  OLLAMA_BASE_URL: http://ollama:11434
+  MODEL_MAX_CONCURRENT_RUNS: ${MODEL_MAX_CONCURRENT_RUNS:-2}
+  MODEL_DAILY_BUDGET_USD: ${MODEL_DAILY_BUDGET_USD:-5}
+  CMVA_API_BASE: ${CMVA_API_BASE:-https://cmva.nl}
+  CMVA_AI_SUMMARY_TOKEN: ${CMVA_AI_SUMMARY_TOKEN:-}
+  CMVA_STORE_PROFILE: ${CMVA_STORE_PROFILE:-}
+
+x-worker-image: &worker-image
+  image: jc-office-worker:local
+  build:
+    context: .
+    dockerfile: apps/worker/Dockerfile
+
+services:
+  postgres:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-office}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Vul POSTGRES_PASSWORD in de server-.env in}
+      POSTGRES_DB: ${POSTGRES_DB:-jc_office}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    stop_grace_period: 60s
+    logging: *logging
+
+  migrate:
+    <<: *worker-image
+    restart: "no"
+    init: true
+    environment: *database-env
+    command: [pnpm, --filter, '@jc/db', migrate:deploy]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [database]
+    logging: *logging
+
+  web:
+    image: jc-office-web:local
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      <<: *app-env
+      APP_URL: https://office.cmva.nl
+      SESSION_SECRET: ${SESSION_SECRET:?Vul SESSION_SECRET in de server-.env in}
+    expose: ["3000"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [database, frontend]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/api/health', {signal: AbortSignal.timeout(5000)}).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    stop_grace_period: 30s
+    security_opt: [no-new-privileges:true]
+    logging: *logging
+
+  worker:
+    <<: *worker-image
+    restart: unless-stopped
+    init: true
+    environment:
+      <<: *app-env
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      WATCHDOG_INTERVAL_SECONDS: ${WATCHDOG_INTERVAL_SECONDS:-15}
+      SCHEDULER_TICK_SECONDS: ${SCHEDULER_TICK_SECONDS:-20}
+      MEETING_VISUAL_SECONDS: ${MEETING_VISUAL_SECONDS:-45}
+      WORKER_PID_FILE: /tmp/jc-office-worker.pid
+    depends_on:
+      ollama:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [database, frontend]
+    healthcheck:
+      test: [CMD, node, /app/scripts/worker-health.mjs]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    stop_grace_period: 60s
+    security_opt: [no-new-privileges:true]
+    logging: *logging
+
+  # Geen GPU-reservering/devices en geen hostpoort; uitsluitend CPU.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-hermes3}
+      CUDA_VISIBLE_DEVICES: "-1"
+      NVIDIA_VISIBLE_DEVICES: void
+      OLLAMA_VULKAN: "0"
+    expose: ["11434"]
+    volumes:
+      - ollama_models:/root/.ollama
+    networks: [frontend]
+    healthcheck:
+      test: [CMD, ollama, list]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    stop_grace_period: 60s
+    logging: *logging
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+    networks: [frontend]
+    logging: *logging
+
+  backup:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    init: true
+    entrypoint: [/bin/sh, /scripts/backup.sh, --loop]
+    environment:
+      <<: *database-env
+      BACKUP_DIR: /backups
+      BACKUP_UTC_HOUR: ${BACKUP_UTC_HOUR:-3}
+    volumes:
+      - ./scripts/backup.sh:/scripts/backup.sh:ro
+      - postgres_backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, 'find /backups -maxdepth 1 -type f -name "office-*.dump" -mmin -1560 | grep -q .']
+      interval: 1h
+      timeout: 10s
+      retries: 1
+      start_period: 5m
+    stop_grace_period: 60s
+    logging: *logging
+
+volumes:
+  ollama_models:
+  postgres_data:
+  postgres_backups:
+  caddy_data:
+  caddy_config:
+
+networks:
+  database:
+    internal: true
+  frontend:

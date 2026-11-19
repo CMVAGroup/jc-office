@@ -1,0 +1,21 @@
+{
+  "name": "@jc/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@jc/agents": "workspace:*",
+    "@jc/connectors": "workspace:*",
+    "@jc/db": "workspace:*",
+    "@jc/domain": "workspace:*",
+    "@jc/policy": "workspace:*",
+    "pg-boss": "12.38.2",
+    "dotenv": "17.2.3"
+  },
+  "devDependencies": { "tsx": "4.23.15" }
+}

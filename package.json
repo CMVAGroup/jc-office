@@ -1,0 +1,54 @@
+{
+  "name": "julie-claire-ai-office",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Julie & Claire AI Office â€” interne e-commerceapp met levend agentenkantoor (fase 0+1, verticale demo)",
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "type": "module",
+  "scripts": {
+    "demo": "node scripts/demo.mjs",
+    "db:start": "node scripts/db.mjs",
+    "db:migrate": "pnpm --filter @jc/db migrate:deploy",
+    "db:seed": "pnpm --filter @jc/db seed",
+    "db:reset": "pnpm --filter @jc/db reset",
+    "dev:web": "pnpm --filter @jc/web dev",
+    "dev:worker": "pnpm --filter @jc/worker dev",
+    "typecheck": "pnpm -r --parallel typecheck",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:e2e": "playwright test",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "@types/node": "24.19.2",
+    "dotenv": "17.2.3",
+    "embedded-postgres": "17.11.0-beta.19",
+    "prettier": "3.6.2",
+    "typescript": "6.0.3",
+    "vitest": "4.1.12",
+    "@jc/agents": "workspace:*",
+    "@jc/db": "workspace:*",
+    "@jc/domain": "workspace:*",
+    "@jc/policy": "workspace:*",
+    "@jc/connectors": "workspace:*",
+    "@jc/ui": "workspace:*",
+    "pg": "8.23.1",
+    "@types/pg": "8.23.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "prisma",
+      "esbuild",
+      "sharp",
+      "@embedded-postgres/windows-x64",
+      "embedded-postgres",
+      "unrs-resolver"
+    ]
+  }
+}

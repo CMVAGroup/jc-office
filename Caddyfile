@@ -1,0 +1,15 @@
+# DNS moet naar de VPS wijzen en poorten 80/443 moeten vrij zijn.
+# Caddy bewaart en vernieuwt certificaten in het vaste caddy_data-volume.
+office.cmva.nl {
+	encode zstd gzip
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		Strict-Transport-Security "max-age=31536000"
+	}
+	request_body {
+		max_size 1MB
+	}
+	reverse_proxy web:3000
+}

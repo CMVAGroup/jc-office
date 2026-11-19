@@ -1,0 +1,33 @@
+{
+  "name": "@jc/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "generate": "prisma generate",
+    "migrate:dev": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "seed": "tsx src/seed.ts",
+    "reset": "prisma migrate reset --force && tsx src/seed.ts",
+    "owner:create": "tsx src/create-owner.ts"
+  },
+  "dependencies": {
+    "@jc/connectors": "workspace:*",
+    "@jc/domain": "workspace:*",
+    "@jc/policy": "workspace:*",
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "bcryptjs": "3.0.3",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "dotenv": "17.2.3",
+    "prisma": "7.10.1",
+    "tsx": "4.23.15"
+  }
+}

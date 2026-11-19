@@ -1,0 +1,659 @@
+// Julie & Claire AI Office — databaseschema (fase 1)
+// Conventies: alle records gescoped met workspace_id; geld in gehele kleinste valuta-eenheid (minor units);
+// timestamps in UTC; fixturedata gemarkeerd met is_demo = true.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- Toegang ----------
+model Workspace {
+  id                String       @id @default(cuid())
+  name              String
+  reportingTimezone String       @default("Europe/Amsterdam") @map("reporting_timezone")
+  shopCurrency      String?      @map("shop_currency")
+  currencyConfirmed Boolean      @default(false) @map("currency_confirmed")
+  emergencyStop     Boolean      @default(false) @map("emergency_stop")
+  isDemo            Boolean      @default(false) @map("is_demo")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  memberships       Membership[]
+
+  @@map("workspaces")
+}
+
+model User {
+  id          String       @id @default(cuid())
+  email       String       @unique
+  displayName String       @map("display_name")
+  passwordHash String?     @map("password_hash")
+  isDemo      Boolean      @default(false) @map("is_demo")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  memberships Membership[]
+
+  @@map("users")
+}
+
+model Membership {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  userId      String    @map("user_id")
+  role        String // owner | operator | viewer
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@unique([workspaceId, userId])
+  @@map("memberships")
+}
+
+// ---------- Koppelingen ----------
+model Connection {
+  id              String    @id @default(cuid())
+  workspaceId     String    @map("workspace_id")
+  provider        String // shopify | meta | klaviyo | clarity
+  accountRef      String?   @map("account_ref")
+  status          String // demo_not_connected | connected | limited | stale | action_required
+  scopes          String[]  @default([])
+  secretRef       String?   @map("secret_ref") // verwijzing naar secretmanager/env, nooit de secret zelf
+  lastProbeAt     DateTime? @map("last_probe_at")
+  lastProbeOk     Boolean?  @map("last_probe_ok")
+  lastError       String?   @map("last_error")
+  accountTimezone String?   @map("account_timezone")
+  currency        String?
+  isDemo          Boolean   @default(false) @map("is_demo")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, provider])
+  @@map("connections")
+}
+
+model SyncRun {
+  id            String    @id @default(cuid())
+  workspaceId   String    @map("workspace_id")
+  provider      String
+  kind          String // fixture_import | initial | incremental | reconcile
+  status        String // running | succeeded | failed
+  startedAt     DateTime  @default(now()) @map("started_at")
+  finishedAt    DateTime? @map("finished_at")
+  recordCount   Int       @default(0) @map("record_count")
+  sourceVersion String    @map("source_version")
+  error         String?
+  isDemo        Boolean   @default(false) @map("is_demo")
+
+  @@map("sync_runs")
+}
+
+model SyncCursor {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  provider    String
+  resource    String
+  cursor      String?
+  watermark   DateTime?
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, provider, resource])
+  @@map("sync_cursors")
+}
+
+model WebhookReceipt {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  provider    String
+  accountRef  String    @map("account_ref")
+  eventId     String    @map("event_id")
+  topic       String
+  receivedAt  DateTime  @default(now()) @map("received_at")
+  processedAt DateTime? @map("processed_at")
+
+  @@unique([provider, accountRef, eventId])
+  @@map("webhook_receipts")
+}
+
+// ---------- Commerce ----------
+model CmvaDailyMetric {
+  id             String   @id @default(cuid())
+  workspaceId    String   @map("workspace_id")
+  storeProfile   String   @map("store_profile")
+  dateLocal      String   @map("date_local")
+  metric         String
+  valueMinor     BigInt?  @map("value_minor")
+  unit           String
+  sourceCurrency String   @map("source_currency")
+  sourceTimezone String   @map("source_timezone")
+  fetchedAt      DateTime @map("fetched_at")
+  generatedAt    DateTime @map("generated_at")
+  sourceVersion  String   @map("source_version")
+  dateAssumption String   @map("date_assumption")
+  isDemo         Boolean  @default(false) @map("is_demo")
+
+  @@unique([workspaceId, storeProfile, dateLocal, metric], map: "cmva_daily_metric_scope_key")
+  @@map("cmva_daily_metrics")
+}
+
+model Product {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  provider    String    @default("shopify")
+  externalId  String    @map("external_id")
+  title       String
+  status      String
+  isDemo      Boolean   @default(false) @map("is_demo")
+  variants    Variant[]
+
+  @@unique([workspaceId, provider, externalId])
+  @@map("products")
+}
+
+model Variant {
+  id              String  @id @default(cuid())
+  workspaceId     String  @map("workspace_id")
+  productId       String  @map("product_id")
+  externalId      String  @map("external_id")
+  sku             String
+  title           String
+  priceExVatMinor Int     @map("price_ex_vat_minor")
+  isDemo          Boolean @default(false) @map("is_demo")
+  product         Product @relation(fields: [productId], references: [id])
+
+  @@unique([workspaceId, externalId])
+  @@map("variants")
+}
+
+model InventorySnapshot {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  sku         String
+  locationRef String   @map("location_ref")
+  available   Int
+  capturedAt  DateTime @map("captured_at")
+  isDemo      Boolean  @default(false) @map("is_demo")
+
+  @@map("inventory_snapshots")
+}
+
+model Order {
+  id                 String       @id @default(cuid())
+  workspaceId        String       @map("workspace_id")
+  provider           String       @default("shopify")
+  externalId         String       @map("external_id")
+  name               String
+  createdAtSource    DateTime     @map("created_at_source")
+  cancelledAt        DateTime?    @map("cancelled_at")
+  isTest             Boolean      @default(false) @map("is_test")
+  currency           String
+  shippingExVatMinor Int          @default(0) @map("shipping_ex_vat_minor")
+  taxMinor           Int          @default(0) @map("tax_minor")
+  sourceVersion      String       @map("source_version")
+  isDemo             Boolean      @default(false) @map("is_demo")
+  lines              OrderLine[]
+  refundLines        RefundLine[]
+
+  @@unique([workspaceId, provider, externalId])
+  @@map("orders")
+}
+
+model OrderLine {
+  id                  String  @id @default(cuid())
+  workspaceId         String  @map("workspace_id")
+  orderId             String  @map("order_id")
+  externalId          String  @map("external_id")
+  sku                 String
+  quantity            Int
+  unitPriceExVatMinor Int     @map("unit_price_ex_vat_minor")
+  discountExVatMinor  Int     @default(0) @map("discount_ex_vat_minor")
+  isDemo              Boolean @default(false) @map("is_demo")
+  order               Order   @relation(fields: [orderId], references: [id])
+
+  @@unique([workspaceId, externalId])
+  @@map("order_lines")
+}
+
+model RefundLine {
+  id               String   @id @default(cuid())
+  workspaceId      String   @map("workspace_id")
+  orderId          String   @map("order_id")
+  externalId       String   @map("external_id")
+  sku              String
+  quantity         Int
+  amountExVatMinor Int      @map("amount_ex_vat_minor")
+  refundedAt       DateTime @map("refunded_at")
+  isDemo           Boolean  @default(false) @map("is_demo")
+  order            Order    @relation(fields: [orderId], references: [id])
+
+  @@unique([workspaceId, externalId])
+  @@map("refund_lines")
+}
+
+model CostEntry {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  sku         String
+  kind        String // cogs | fulfillment | shipping | payment_fee
+  amountMinor Int      @map("amount_minor")
+  currency    String
+  validFrom   DateTime @map("valid_from")
+  isDemo      Boolean  @default(false) @map("is_demo")
+
+  @@map("cost_entries")
+}
+
+// ---------- Rapporten ----------
+model AdInsight {
+  id                 String   @id @default(cuid())
+  workspaceId        String   @map("workspace_id")
+  provider           String   @default("meta")
+  accountRef         String   @map("account_ref")
+  level              String // account | campaign | adset | ad
+  externalId         String   @map("external_id")
+  name               String
+  dateLocal          String   @map("date_local") // YYYY-MM-DD in accounttijdzone
+  accountTimezone    String   @map("account_timezone")
+  currency           String
+  attributionWindow  String   @map("attribution_window")
+  actionReportTime   String   @map("action_report_time")
+  breakdownKey       String   @default("none") @map("breakdown_key")
+  spendMinor         Int      @map("spend_minor")
+  impressions        Int
+  linkClicks         Int      @map("link_clicks")
+  purchases          Int
+  purchaseValueMinor Int      @map("purchase_value_minor")
+  fetchedAt          DateTime @map("fetched_at")
+  isDemo             Boolean  @default(false) @map("is_demo")
+
+  @@unique([workspaceId, provider, accountRef, level, externalId, dateLocal, breakdownKey, attributionWindow])
+  @@map("ad_insights")
+}
+
+model KlaviyoReport {
+  id                     String   @id @default(cuid())
+  workspaceId            String   @map("workspace_id")
+  kind                   String // campaign | flow
+  externalId             String   @map("external_id")
+  name                   String
+  periodStart            DateTime @map("period_start")
+  periodEnd              DateTime @map("period_end")
+  conversionMetricId     String   @map("conversion_metric_id")
+  recipients             Int
+  clicks                 Int
+  unsubscribes           Int
+  conversions            Int
+  attributedRevenueMinor Int      @map("attributed_revenue_minor")
+  currency               String
+  fetchedAt              DateTime @map("fetched_at")
+  isDemo                 Boolean  @default(false) @map("is_demo")
+
+  @@map("klaviyo_reports")
+}
+
+model ClaritySnapshot {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  windowStart DateTime @map("window_start")
+  windowEnd   DateTime @map("window_end")
+  dimensions  String[]
+  queryHash   String   @map("query_hash")
+  rowCount    Int      @map("row_count")
+  truncated   Boolean  @default(false)
+  rows        Json
+  fetchedAt   DateTime @map("fetched_at")
+  isDemo      Boolean  @default(false) @map("is_demo")
+
+  @@map("clarity_snapshots")
+}
+
+model MetricSnapshot {
+  id              String   @id @default(cuid())
+  workspaceId     String   @map("workspace_id")
+  metricKey       String   @map("metric_key")
+  status          String // ok | partial | unknown
+  value           Float?
+  unit            String // minor | ratio | count
+  currency        String?
+  periodStart     DateTime @map("period_start")
+  periodEnd       DateTime @map("period_end")
+  timezone        String
+  formula         String
+  numerator       Float?
+  denominator     Float?
+  filters         Json
+  sourceRecordIds String[] @map("source_record_ids")
+  notes           String[]
+  contractVersion String   @map("contract_version")
+  computedAt      DateTime @default(now()) @map("computed_at")
+  taskId          String?  @map("task_id")
+  isDemo          Boolean  @default(false) @map("is_demo")
+
+  @@map("metric_snapshots")
+}
+
+// ---------- Werk ----------
+model Task {
+  id               String    @id @default(cuid())
+  workspaceId      String    @map("workspace_id")
+  type             String // morning_brief | commerce_analysis | demo_stall | demo_rate_limit
+  title            String
+  agentRole        String    @map("agent_role")
+  status           String // queued | running | blocked | awaiting_review | succeeded | failed | cancelled
+  waitReason       String?   @map("wait_reason") // dependency | rate_limit | owner_approval
+  rateLimitUntil   DateTime? @map("rate_limit_until")
+  input            Json      @default("{}")
+  parentTaskId     String?   @map("parent_task_id")
+  createdById      String?   @map("created_by_id")
+  attempts         Int       @default(0)
+  maxAttempts      Int       @default(2) @map("max_attempts")
+  leaseOwner       String?   @map("lease_owner")
+  leaseUntil       DateTime? @map("lease_until")
+  heartbeatAt      DateTime? @map("heartbeat_at")
+  progressAt       DateTime? @map("progress_at")
+  progressNote     String?   @map("progress_note")
+  deadlineAt       DateTime? @map("deadline_at")
+  queuedAt         DateTime  @default(now()) @map("queued_at")
+  dispatchedAt     DateTime? @map("dispatched_at") // laatst naar pg-boss gestuurd (dubbele jobs zijn onschadelijk: claim is voorwaardelijk)
+  startedAt        DateTime? @map("started_at")
+  finishedAt       DateTime? @map("finished_at")
+  failureReason    String?   @map("failure_reason")
+  resultArtifactId String?   @map("result_artifact_id")
+  isDemo           Boolean   @default(false) @map("is_demo")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@index([workspaceId, status])
+  @@map("tasks")
+}
+
+model TaskDependency {
+  id          String @id @default(cuid())
+  workspaceId String @map("workspace_id")
+  taskId      String @map("task_id")
+  dependsOnId String @map("depends_on_id")
+
+  @@unique([taskId, dependsOnId])
+  @@map("task_dependencies")
+}
+
+model AgentRun {
+  id              String    @id @default(cuid())
+  workspaceId     String    @map("workspace_id")
+  taskId          String    @map("task_id")
+  agentRole       String    @map("agent_role")
+  promptVersion   String    @map("prompt_version")
+  modelProvider   String    @map("model_provider")
+  modelAlias      String    @map("model_alias")
+  status          String // running | succeeded | failed
+  attempt         Int
+  repairAttempted Boolean   @default(false) @map("repair_attempted")
+  inputTokens     Int       @default(0) @map("input_tokens")
+  outputTokens    Int       @default(0) @map("output_tokens")
+  costUsdMicros   Int       @default(0) @map("cost_usd_micros")
+  toolCalls       Json      @default("[]") @map("tool_calls")
+  error           String?
+  startedAt       DateTime  @default(now()) @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+
+  @@map("agent_runs")
+}
+
+// Eventfeed voor SSE (cursor = id). Bevat taak-, meeting- en watchdogevents.
+model OfficeEvent {
+  id          Int      @id @default(autoincrement())
+  workspaceId String   @map("workspace_id")
+  kind        String
+  taskId      String?  @map("task_id")
+  meetingId   String?  @map("meeting_id")
+  agentRole   String?  @map("agent_role")
+  payload     Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId, id])
+  @@map("task_events")
+}
+
+model Schedule {
+  id                String           @id @default(cuid())
+  workspaceId       String           @map("workspace_id")
+  key               String // meeting_standup | meeting_progress | meeting_close | morning_brief
+  kind              String // meeting | task
+  label             String
+  timeOfDay         String           @map("time_of_day") // HH:MM lokale tijd
+  weekdays          Int[] // 1=ma ... 7=zo
+  timezone          String
+  enabled           Boolean          @default(true)
+  graceMinutes      Int              @default(10) @map("grace_minutes")
+  maxCatchUpMinutes Int              @default(180) @map("max_catch_up_minutes")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+  firings           ScheduleFiring[]
+
+  @@unique([workspaceId, key])
+  @@map("schedules")
+}
+
+model ScheduleFiring {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  scheduleId  String   @map("schedule_id")
+  plannedAt   DateTime @map("planned_at")
+  firedAt     DateTime @default(now()) @map("fired_at")
+  late        Boolean  @default(false)
+  outcome     String // started | skipped_emergency_stop
+  refId       String?  @map("ref_id")
+  schedule    Schedule @relation(fields: [scheduleId], references: [id])
+
+  @@unique([scheduleId, plannedAt])
+  @@map("schedule_firings")
+}
+
+// ---------- Resultaten ----------
+model Artifact {
+  id            String   @id @default(cuid())
+  workspaceId   String   @map("workspace_id")
+  taskId        String?  @map("task_id")
+  kind          String // analyst_report | morning_brief
+  schemaName    String   @map("schema_name")
+  schemaVersion String   @map("schema_version")
+  content       Json
+  createdAt     DateTime @default(now()) @map("created_at")
+  isDemo        Boolean  @default(false) @map("is_demo")
+
+  @@map("artifacts")
+}
+
+model EvidenceRef {
+  id          String  @id @default(cuid())
+  workspaceId String  @map("workspace_id")
+  artifactId  String  @map("artifact_id")
+  refKind     String  @map("ref_kind") // metric_snapshot | task | artifact | source_record
+  refId       String  @map("ref_id")
+  label       String?
+
+  @@map("evidence_refs")
+}
+
+model Finding {
+  id               String   @id @default(cuid())
+  workspaceId      String   @map("workspace_id")
+  artifactId       String   @map("artifact_id")
+  kind             String // fact | hypothesis
+  statement        String
+  metricSnapshotId String?  @map("metric_snapshot_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@map("findings")
+}
+
+// ---------- Acties ----------
+model ActionProposal {
+  id            String     @id @default(cuid())
+  workspaceId   String     @map("workspace_id")
+  provider      String
+  accountRef    String     @map("account_ref")
+  targetObject  String     @map("target_object")
+  operation     String
+  payload       Json
+  payloadHash   String     @map("payload_hash")
+  preconditions Json
+  evidence      Json       @default("[]")
+  risk          String
+  status        String // draft | pending_approval | approved | rejected | returned | expired | executing | verified | failed | unknown
+  expiresAt     DateTime   @map("expires_at")
+  createdById   String?    @map("created_by_id")
+  sourceTaskId  String?    @map("source_task_id")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  isDemo        Boolean    @default(false) @map("is_demo")
+  approvals     Approval[]
+
+  @@map("action_proposals")
+}
+
+model Approval {
+  id          String         @id @default(cuid())
+  workspaceId String         @map("workspace_id")
+  proposalId  String         @map("proposal_id")
+  decidedById String         @map("decided_by_id")
+  decision    String // approved | rejected | returned
+  payloadHash String         @map("payload_hash")
+  note        String?
+  decidedAt   DateTime       @default(now()) @map("decided_at")
+  proposal    ActionProposal @relation(fields: [proposalId], references: [id])
+
+  @@unique([proposalId]) // één beslissing per voorstel; gewijzigde payload = nieuw voorstel
+  @@map("approvals")
+}
+
+model AuditEvent {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  actorId     String?  @map("actor_id")
+  action      String
+  target      String?
+  detail      Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("audit_events")
+}
+
+// ---------- Kennis ----------
+model KnowledgeDocument {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  slug        String
+  title       String
+  status      String // draft | published | retired
+  ownerName   String?  @map("owner_name")
+  source      String
+  body        String
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, slug])
+  @@map("knowledge_documents")
+}
+
+// ---------- Vergaderingen ----------
+model Meeting {
+  id             String               @id @default(cuid())
+  workspaceId    String               @map("workspace_id")
+  scheduleKey    String?              @map("schedule_key")
+  meetingKey     String               @map("meeting_key") // uniek: schedule+geplande tijd, of demo-<id>
+  kind           String // standup | progress | close | demo
+  title          String
+  plannedAt      DateTime             @map("planned_at")
+  late           Boolean              @default(false)
+  status         String // gathering | in_progress | completed | failed
+  startedAt      DateTime             @default(now()) @map("started_at")
+  completedAt    DateTime?            @map("completed_at")
+  sinceAt        DateTime             @map("since_at")
+  snapshot       Json                 @default("{}")
+  synthesis      Json?
+  synthesisError String?              @map("synthesis_error")
+  isDemo         Boolean              @default(false) @map("is_demo")
+  participants   MeetingParticipant[]
+  updates        MeetingUpdate[]
+  actions        MeetingAction[]
+
+  @@unique([workspaceId, meetingKey])
+  @@map("meetings")
+}
+
+model MeetingParticipant {
+  id         String  @id @default(cuid())
+  meetingId  String  @map("meeting_id")
+  agentRole  String  @map("agent_role")
+  seatIndex  Int     @map("seat_index")
+  attendance String // present | background_task
+  meeting    Meeting @relation(fields: [meetingId], references: [id])
+
+  @@unique([meetingId, agentRole])
+  @@unique([meetingId, seatIndex])
+  @@map("meeting_participants")
+}
+
+model MeetingUpdate {
+  id         String  @id @default(cuid())
+  meetingId  String  @map("meeting_id")
+  agentRole  String  @map("agent_role")
+  order      Int
+  done       Json // [{text, taskId}]
+  current    Json
+  blockers   Json
+  nextStep   String  @map("next_step")
+  text       String
+  staleInput Boolean @default(false) @map("stale_input")
+  evidence   Json    @default("[]")
+  meeting    Meeting @relation(fields: [meetingId], references: [id])
+
+  @@map("meeting_updates")
+}
+
+model MeetingAction {
+  id          String    @id @default(cuid())
+  meetingId   String    @map("meeting_id")
+  ownerRole   String    @map("owner_role")
+  description String
+  dueAt       DateTime? @map("due_at")
+  kind        String // action | owner_decision
+  evidence    Json      @default("[]")
+  meeting     Meeting   @relation(fields: [meetingId], references: [id])
+
+  @@map("meeting_actions")
+}
+
+// ---------- Watchdog ----------
+model WatchdogAlert {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  taskId      String    @map("task_id")
+  agentRole   String    @map("agent_role")
+  state       String // stalled | heartbeat_lost | deadline_missed | queued_too_long | failed
+  cause       String
+  status      String // open | recovered | acknowledged
+  openedAt    DateTime  @default(now()) @map("opened_at")
+  lastSeenAt  DateTime  @default(now()) @map("last_seen_at")
+  resolvedAt  DateTime? @map("resolved_at")
+
+  @@index([workspaceId, status])
+  @@map("watchdog_alerts")
+}
+
+model WorkerHeartbeat {
+  workerId   String   @id @map("worker_id")
+  startedAt  DateTime @map("started_at")
+  lastBeatAt DateTime @map("last_beat_at")
+  info       Json     @default("{}")
+
+  @@map("worker_heartbeats")
+}
+
+// Pre-authenticatie: alleen gehashte limietsleutels, nog geen workspace bekend.
+model AuthRateLimit {
+  key       String   @id
+  attempts  Int
+  expiresAt DateTime @map("expires_at")
+
+  @@index([expiresAt])
+  @@map("auth_rate_limits")
+}
