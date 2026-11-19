@@ -327,14 +327,32 @@ async function runCsMedewerker(deps: WorkerDeps, task: TaskRow) {
   await transitionTask(db, task.id, 'succeeded', { workerId, patch: { progressNote: `${enqueued} cs_draft taak/taken aangemaakt` } });
 }
 
+/** Searches knowledge docs for snippets relevant to the given query terms. */
+async function fetchKnowledge(db: WorkerDeps['db'], workspaceId: string, query: string) {
+  const terms = query.split(/\s+/).filter(Boolean).slice(0, 5).join(' | ');
+  const docs = await db.knowledgeDocument.findMany({
+    where: {
+      workspaceId,
+      status: { in: ['published', 'draft'] },
+      OR: [{ title: { contains: query, mode: 'insensitive' } }, { body: { contains: terms, mode: 'insensitive' } }],
+    },
+    select: { slug: true, title: true, body: true },
+    orderBy: { updatedAt: 'desc' },
+    take: 5,
+  });
+  return docs;
+}
+
 /** Writes a draft CS reply for a single ticket using the CS Medewerker model. */
 async function runCsDraft(deps: WorkerDeps, task: TaskRow) {
   const { db, workerId } = deps;
   const input = task.input as unknown as CsDraftInput;
   if (!input.ticketId) throw new TaskAbort('cs_draft: ticketId ontbreekt in input.');
   await reportProgress(db, task.id, workerId, `Concept schrijven voor ticket ${input.ticketId}`);
-  const draft = await csModelStep<CsDraft>(deps, task, 'cs_medewerker', 'cs_draft', SYSTEM_PROMPTS.cs_medewerker, input);
-  await reportProgress(db, task.id, workerId, 'Concept klaar; CS Manager reviewtaak aanmaken');
+  const knowledgeContext = await fetchKnowledge(db, task.workspaceId, `${input.subject} ${input.body.slice(0, 100)}`);
+  const enrichedInput: CsDraftInput = { ...input, knowledgeContext };
+  const draft = await csModelStep<CsDraft>(deps, task, 'cs_medewerker', 'cs_draft', SYSTEM_PROMPTS.cs_medewerker, enrichedInput);
+  await reportProgress(db, task.id, workerId, `Concept klaar (${knowledgeContext.length} kennissnippets gebruikt); CS Manager reviewtaak aanmaken`);
   const reviewInput: CsReviewInput = {
     ticketId: input.ticketId,
     inboundMessageId: input.inboundMessageId,
@@ -343,6 +361,7 @@ async function runCsDraft(deps: WorkerDeps, task: TaskRow) {
     draftBody: draft.draftBody,
     tone: draft.tone,
     reasoning: draft.reasoning,
+    knowledgeContext,
   };
   await createTask(db, {
     workspaceId: task.workspaceId,
@@ -375,12 +394,28 @@ async function runCsReview(deps: WorkerDeps, task: TaskRow) {
       sender: 'agent',
     });
     await reportProgress(db, task.id, workerId, 'Concept-antwoord verzonden naar CMVA voor menselijke goedkeuring');
+    // Save learning to knowledge bank so future replies benefit from this case.
+    const slug = `cs-learning-${input.ticketId}`;
+    const learningBody = [
+      `## Klantprobleem\n${input.subject}`,
+      `## Originele vraag\n${input.originalBody.slice(0, 400)}`,
+      `## Goedgekeurd antwoord\n${review.improvedBody}`,
+      `## Gebruikte toon\n${input.tone}`,
+      `## Redenatie\n${input.reasoning}`,
+      review.changes ? `## Aanpassingen door manager\n${review.changes}` : '',
+    ].filter(Boolean).join('\n\n');
+    await db.knowledgeDocument.upsert({
+      where: { workspaceId_slug: { workspaceId: task.workspaceId, slug } },
+      create: { workspaceId: task.workspaceId, slug, title: `CS lering: ${input.subject.slice(0, 80)}`, status: 'published', source: 'cs_agent', body: learningBody },
+      update: { body: learningBody, title: `CS lering: ${input.subject.slice(0, 80)}` },
+    });
+    await reportProgress(db, task.id, workerId, 'Lering opgeslagen in kennisbank');
   } else if (task.isDemo) {
     await reportProgress(db, task.id, workerId, 'Demo: CMVA POST overgeslagen');
   } else {
     await reportProgress(db, task.id, workerId, 'Concept afgewezen door CS Manager; vereist menselijke review');
   }
-  await transitionTask(db, task.id, 'succeeded', { workerId, patch: { progressNote: review.approved ? 'Concept goedgekeurd en verzonden' : 'Concept voor menselijke review' } });
+  await transitionTask(db, task.id, 'succeeded', { workerId, patch: { progressNote: review.approved ? 'Concept goedgekeurd, verzonden en geleerd' : 'Concept voor menselijke review' } });
   await releaseParentIfReady(db, task.id);
 }
 

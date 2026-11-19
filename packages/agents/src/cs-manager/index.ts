@@ -10,4 +10,5 @@ export interface CsReviewInput {
   draftBody: string;
   tone: string;
   reasoning: string;
+  knowledgeContext?: import('../cs-medewerker').CsKnowledgeSnippet[];
 }

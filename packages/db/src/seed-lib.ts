@@ -140,7 +140,85 @@ export async function seedDemo(db: Db, opts: { now?: Date; knowledgeDir?: string
     update: {},
   });
 
-  // ---- Kennis ----
+  // ---- CS Kennisbank (basis) ----
+  const csKnowledge = [
+    {
+      slug: 'cs-policy-returns',
+      title: 'Retourbeleid Julie & Claire',
+      body: `## Retourbeleid
+- Klanten kunnen items retourneren binnen 30 dagen na ontvangst.
+- Items moeten ongedragen, ongewassen en met originele labels zijn.
+- Retourneren is gratis voor klanten in Nederland en België.
+- Restitutie vindt plaats binnen 5–10 werkdagen na ontvangst retour.
+- Sale-items zijn niet retourneerbaar tenzij defect.
+- Ruilingen zijn mogelijk als het gewenste item op voorraad is.
+
+## Hoe retourneren
+Klant stuurt een e-mail naar support@julie-claire.com met bestelnummer en reden. Wij sturen een gratis retourlabel toe.`,
+    },
+    {
+      slug: 'cs-policy-shipping',
+      title: 'Verzending & levering Julie & Claire',
+      body: `## Verzendtijden
+- Nederland: 1–3 werkdagen
+- België: 2–4 werkdagen
+- Rest van Europa: 3–7 werkdagen
+- Buiten Europa: 7–14 werkdagen
+
+## Verzendkosten
+- Gratis verzending boven €75 (NL/BE)
+- Onder €75: €4,95 (NL), €6,95 (BE)
+
+## Tracking
+Na verzending ontvangt de klant automatisch een track & trace link per e-mail.
+
+## Vertraging
+Bij vertraging door de vervoerder: controleer de track & trace. Als het pakket meer dan 5 werkdagen vertraging heeft, sturen wij een nieuw pakket of geven restitutie.`,
+    },
+    {
+      slug: 'cs-policy-sizing',
+      title: 'Maatadvies & pasvorm Julie & Claire',
+      body: `## Maattabel
+- Onze maten vallen normaal tot iets klein. Bij twijfel, een maat groter bestellen.
+- Maattabel staat op elke productpagina.
+- Strekbare stoffen (jersey, lycra) vallen ruimer.
+
+## Advies geven
+Als de klant vraagt welke maat past: vraag altijd naar normale kledingmaat en of ze liever fitted of oversized dragen. Verwijs naar de maattabel op de website.`,
+    },
+    {
+      slug: 'cs-tone-guidelines',
+      title: 'Toon & stijl CS antwoorden',
+      body: `## Toon
+- Warm, empathisch en professioneel
+- Eerste zin erkent altijd het gevoel of de situatie van de klant
+- Geen zakelijk/koud taalgebruik
+- Schrijf in de taal van de klant (NL/EN/FR/DE)
+
+## Structuur
+1. Erkenning van het probleem
+2. Duidelijk antwoord of actie
+3. Eventuele vervolgstap
+4. Vriendelijke afsluiting
+
+## Afsluiting
+Altijd: "Emily · Customer Care"
+
+## Voorbeeldzin openingen (NL)
+- "Wat vervelend dat je dit hebt meegemaakt!"
+- "Bedankt voor je bericht — ik help je hier graag mee."
+- "Ik begrijp je frustratie en ga dit direct voor je oplossen."`,
+    },
+  ];
+  for (const doc of csKnowledge) {
+    await db.knowledgeDocument.upsert({
+      where: { workspaceId_slug: { workspaceId: ws, slug: doc.slug } },
+      create: { workspaceId: ws, slug: doc.slug, title: doc.title, status: 'published', source: 'seed', body: doc.body },
+      update: { title: doc.title, body: doc.body, status: 'published' },
+    });
+  }
+
+  // ---- Kennis (uit map) ----
   const kdir = opts.knowledgeDir;
   if (kdir && existsSync(kdir)) {
     for (const file of readdirSync(kdir).filter((x) => x.endsWith('.md'))) {
