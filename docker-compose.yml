@@ -160,6 +160,9 @@ services:
     init: true
     environment:
       CLAUDE_PROXY_ENABLED: ${CLAUDE_PROXY_ENABLED:-false}
+    volumes:
+      - /usr/bin/claude:/usr/bin/claude:ro
+      - /home/ubuntu/.claude:/home/node/.claude:ro
     ports: ["127.0.0.1:11435:11435"]
     expose: ["11435"]
     networks: [frontend]
