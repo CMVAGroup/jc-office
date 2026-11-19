@@ -35,7 +35,7 @@ export interface GenerateResult {
 }
 
 export interface ModelAdapter {
-  name: 'mock' | 'anthropic' | 'ollama';
+  name: 'mock' | 'anthropic' | 'ollama' | 'claude-proxy';
   isMock: boolean;
   model: string;
   generate(req: GenerateRequest): Promise<GenerateResult>;
