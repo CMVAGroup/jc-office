@@ -7,9 +7,12 @@ import {
   roleModelTools,
   SYSTEM_PROMPTS,
   type AnalystInput,
+  type CsDraftInput,
+  type CsReviewInput,
   type LeadInput,
   type ToolCallRecord,
 } from '@jc/agents';
+import { CmvaClient, cmvaConfig } from '@jc/connectors';
 import {
   claimTask,
   createTask,
@@ -28,6 +31,8 @@ import {
   METRIC_LABELS,
   RESULT_SCHEMA_VERSION,
   type AgentRole,
+  type CsDraft,
+  type CsReview,
   type EvidenceRefT,
   type MorningBrief,
   type SchemaName,
@@ -251,6 +256,134 @@ async function runDemoRateLimit(deps: WorkerDeps, task: TaskRow) {
   await transitionTask(deps.db, task.id, 'succeeded', { workerId: deps.workerId, patch: { progressNote: 'DEMO afgerond (geen resultaatartefact)' } });
 }
 
+/** Lightweight model step for CS agents (no evidence tracking, no ROLE_CONFIGS). */
+async function csModelStep<T>(
+  deps: WorkerDeps,
+  task: TaskRow,
+  role: 'cs_medewerker' | 'cs_manager',
+  schemaName: SchemaName,
+  system: string,
+  input: unknown,
+): Promise<T> {
+  await assertBudget(deps, task.workspaceId);
+  const run = await deps.db.agentRun.create({
+    data: {
+      workspaceId: task.workspaceId, taskId: task.id, agentRole: role, promptVersion: `${role}-2026-11-19.1`,
+      modelProvider: deps.adapter.name, modelAlias: deps.adapter.model, status: 'running', attempt: task.attempts,
+    },
+  });
+  try {
+    const res = await deps.sem.run(() => runValidated<T>(deps.adapter, { schemaName, system, input, maxTokens: 1500 }, null));
+    const usage = res.attempts.reduce((a, r) => ({ i: a.i + r.usage.inputTokens, o: a.o + r.usage.outputTokens, c: a.c + r.usage.costUsdMicros }), { i: 0, o: 0, c: 0 });
+    await deps.db.agentRun.update({
+      where: { id: run.id },
+      data: { status: res.ok ? 'succeeded' : 'failed', finishedAt: new Date(), repairAttempted: res.repairAttempted, inputTokens: usage.i, outputTokens: usage.o, costUsdMicros: usage.c, error: res.ok ? null : res.reason },
+    });
+    if (!res.ok) throw new TaskAbort(res.reason);
+    return res.output;
+  } catch (e) {
+    await deps.db.agentRun.updateMany({ where: { id: run.id, status: 'running' }, data: { status: 'failed', finishedAt: new Date(), error: String((e as Error).message) } });
+    throw e;
+  }
+}
+
+/** Fetches open CS tickets from CMVA inbox and enqueues one cs_draft task per new ticket. */
+async function runCsMedewerker(deps: WorkerDeps, task: TaskRow) {
+  const { db, workerId } = deps;
+  const cfg = cmvaConfig();
+  const client = new CmvaClient(cfg);
+  const inbox = await client.inbox('julie-claire', 5);
+  await reportProgress(db, task.id, workerId, `CMVA inbox: ${inbox.tickets.length} open ticket(s) opgehaald`);
+  let enqueued = 0;
+  for (const ticket of inbox.tickets) {
+    // Skip if a cs_draft task for this ticket already exists (match by ticketId in input).
+    const alreadyQueued = await db.task.findFirst({
+      where: {
+        workspaceId: task.workspaceId,
+        type: 'cs_draft',
+        status: { notIn: ['failed', 'cancelled'] },
+        input: { path: ['ticketId'], equals: ticket.id },
+      },
+    });
+    if (alreadyQueued) continue;
+    const input: CsDraftInput = {
+      ticketId: ticket.id,
+      inboundMessageId: ticket.inbound_message_id,
+      subject: ticket.subject,
+      body: ticket.body,
+    };
+    await createTask(db, {
+      workspaceId: task.workspaceId,
+      type: 'cs_draft',
+      title: `CS draft: ${ticket.subject.slice(0, 60)}`,
+      agentRole: 'merch',
+      input: input as unknown as Record<string, unknown>,
+      parentTaskId: task.id,
+      isDemo: task.isDemo,
+      createdById: task.createdById,
+    });
+    enqueued++;
+  }
+  await transitionTask(db, task.id, 'succeeded', { workerId, patch: { progressNote: `${enqueued} cs_draft taak/taken aangemaakt` } });
+}
+
+/** Writes a draft CS reply for a single ticket using the CS Medewerker model. */
+async function runCsDraft(deps: WorkerDeps, task: TaskRow) {
+  const { db, workerId } = deps;
+  const input = task.input as unknown as CsDraftInput;
+  if (!input.ticketId) throw new TaskAbort('cs_draft: ticketId ontbreekt in input.');
+  await reportProgress(db, task.id, workerId, `Concept schrijven voor ticket ${input.ticketId}`);
+  const draft = await csModelStep<CsDraft>(deps, task, 'cs_medewerker', 'cs_draft', SYSTEM_PROMPTS.cs_medewerker, input);
+  await reportProgress(db, task.id, workerId, 'Concept klaar; CS Manager reviewtaak aanmaken');
+  const reviewInput: CsReviewInput = {
+    ticketId: input.ticketId,
+    inboundMessageId: input.inboundMessageId,
+    subject: input.subject,
+    originalBody: input.body,
+    draftBody: draft.draftBody,
+    tone: draft.tone,
+    reasoning: draft.reasoning,
+  };
+  await createTask(db, {
+    workspaceId: task.workspaceId,
+    type: 'cs_review',
+    title: `CS review: ${input.subject.slice(0, 60)}`,
+    agentRole: 'merch',
+    input: reviewInput as unknown as Record<string, unknown>,
+    parentTaskId: task.id,
+    isDemo: task.isDemo,
+    createdById: task.createdById,
+  });
+  await transitionTask(db, task.id, 'succeeded', { workerId, patch: { progressNote: 'Concept geschreven; review ingepland' } });
+}
+
+/** Reviews and improves the draft, then POSTs it to CMVA as a draft reply. */
+async function runCsReview(deps: WorkerDeps, task: TaskRow) {
+  const { db, workerId } = deps;
+  const input = task.input as unknown as CsReviewInput;
+  if (!input.ticketId) throw new TaskAbort('cs_review: ticketId ontbreekt in input.');
+  await reportProgress(db, task.id, workerId, `Manager reviewt concept voor ticket ${input.ticketId}`);
+  const review = await csModelStep<CsReview>(deps, task, 'cs_manager', 'cs_review', SYSTEM_PROMPTS.cs_manager, input);
+  if (review.approved && !task.isDemo) {
+    const cfg = cmvaConfig();
+    const client = new CmvaClient(cfg);
+    await client.replyDraft({
+      store: 'julie-claire',
+      ticketId: input.ticketId,
+      inboundMessageId: input.inboundMessageId,
+      body: review.improvedBody,
+      sender: 'agent',
+    });
+    await reportProgress(db, task.id, workerId, 'Concept-antwoord verzonden naar CMVA voor menselijke goedkeuring');
+  } else if (task.isDemo) {
+    await reportProgress(db, task.id, workerId, 'Demo: CMVA POST overgeslagen');
+  } else {
+    await reportProgress(db, task.id, workerId, 'Concept afgewezen door CS Manager; vereist menselijke review');
+  }
+  await transitionTask(db, task.id, 'succeeded', { workerId, patch: { progressNote: review.approved ? 'Concept goedgekeurd en verzonden' : 'Concept voor menselijke review' } });
+  await releaseParentIfReady(db, task.id);
+}
+
 export async function processTask(deps: WorkerDeps, taskId: string): Promise<'done' | 'not_claimed' | 'skipped'> {
   const { db, workerId } = deps;
   const pre = await db.task.findUnique({ where: { id: taskId } });
@@ -292,6 +425,15 @@ export async function processTask(deps: WorkerDeps, taskId: string): Promise<'do
         break;
       case 'demo_rate_limit':
         await runDemoRateLimit(deps, task);
+        break;
+      case 'cs_medewerker':
+        await runCsMedewerker(deps, task);
+        break;
+      case 'cs_draft':
+        await runCsDraft(deps, task);
+        break;
+      case 'cs_review':
+        await runCsReview(deps, task);
         break;
       default:
         throw new TaskAbort(`Onbekend taaktype ${task.type}`);

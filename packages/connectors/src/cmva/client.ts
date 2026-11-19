@@ -1,5 +1,5 @@
 import { ConnectorError, type Connector, type ProbeResult } from '../index';
-import { CmvaSummarySchema, type CmvaSummary } from './schema';
+import { CmvaInboxSchema, CmvaSummarySchema, type CmvaInbox, type CmvaSummary } from './schema';
 
 export interface CmvaConfig {
   base: string;
@@ -83,6 +83,61 @@ export class CmvaClient {
         'CMVA respons wijkt af of het gekozen winkelprofiel ontbreekt.',
       );
     return parsed.data;
+  }
+
+  async inbox(store: string, limit = 5): Promise<CmvaInbox> {
+    cmvaConfig({ CMVA_API_BASE: this.config.base, CMVA_AI_SUMMARY_TOKEN: this.config.token, CMVA_STORE_PROFILE: this.config.profile });
+    const url = new URL(`${this.config.base.replace(/\/+$/, '')}/api/public/ai/inbox`);
+    url.searchParams.set('store', store);
+    url.searchParams.set('limit', String(limit));
+    let response: Response;
+    try {
+      response = await this.request(url, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${this.config.token}` },
+        signal: AbortSignal.timeout(20_000),
+        redirect: 'error',
+        cache: 'no-store',
+      });
+    } catch {
+      throw new ConnectorError('provider_outage', 'CMVA inbox is niet bereikbaar.');
+    }
+    if (response.status === 401 || response.status === 403) throw new ConnectorError('auth', 'CMVA weigert de authenticatie (inbox).');
+    if (!response.ok) throw new ConnectorError('provider_outage', 'CMVA inbox retourneert een fout.');
+    let data: unknown;
+    try { data = await response.json(); } catch { throw new ConnectorError('schema_change', 'CMVA inbox geeft geen geldige JSON terug.'); }
+    const parsed = CmvaInboxSchema.safeParse(data);
+    if (!parsed.success) throw new ConnectorError('schema_change', 'CMVA inbox respons wijkt af van het verwachte schema.');
+    return parsed.data;
+  }
+
+  async replyDraft(payload: {
+    store: string;
+    ticketId: string;
+    inboundMessageId: string;
+    body: string;
+    sender: string;
+  }): Promise<void> {
+    cmvaConfig({ CMVA_API_BASE: this.config.base, CMVA_AI_SUMMARY_TOKEN: this.config.token, CMVA_STORE_PROFILE: this.config.profile });
+    const url = new URL(`${this.config.base.replace(/\/+$/, '')}/api/public/ai/reply`);
+    let response: Response;
+    try {
+      response = await this.request(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.config.token}`,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': `cs-${payload.ticketId}-${payload.inboundMessageId}`,
+        },
+        body: JSON.stringify({ store: payload.store, ticketId: payload.ticketId, inboundMessageId: payload.inboundMessageId, body: payload.body, draftOnly: true, sender: payload.sender }),
+        signal: AbortSignal.timeout(20_000),
+        redirect: 'error',
+      });
+    } catch {
+      throw new ConnectorError('provider_outage', 'CMVA reply endpoint is niet bereikbaar.');
+    }
+    if (response.status === 401 || response.status === 403) throw new ConnectorError('auth', 'CMVA weigert de authenticatie (reply).');
+    if (!response.ok) throw new ConnectorError('provider_outage', `CMVA reply retourneert HTTP ${response.status}.`);
   }
 
   async probe(): Promise<ProbeResult> {

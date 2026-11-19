@@ -86,10 +86,29 @@ export const MeetingSynthesisSchema = z.object({
 });
 export type MeetingSynthesis = z.infer<typeof MeetingSynthesisSchema>;
 
+export const CsDraftSchema = z.object({
+  ticketId: z.string().min(1),
+  subject: z.string().min(1),
+  draftBody: z.string().min(1),
+  tone: z.string().min(1),
+  reasoning: z.string().min(1),
+});
+export type CsDraft = z.infer<typeof CsDraftSchema>;
+
+export const CsReviewSchema = z.object({
+  ticketId: z.string().min(1),
+  improvedBody: z.string().min(1),
+  changes: z.string().min(1),
+  approved: z.boolean(),
+});
+export type CsReview = z.infer<typeof CsReviewSchema>;
+
 export const SCHEMAS = {
   analyst_report: AnalystReportSchema,
   morning_brief: MorningBriefSchema,
   meeting_synthesis: MeetingSynthesisSchema,
+  cs_draft: CsDraftSchema,
+  cs_review: CsReviewSchema,
 } as const;
 export type SchemaName = keyof typeof SCHEMAS;
 

@@ -134,6 +134,11 @@ export async function seedDemo(db: Db, opts: { now?: Date; knowledgeDir?: string
     create: { workspaceId: ws, key: 'morning_brief', kind: 'task', label: 'Ochtendbrief', timeOfDay: '08:15', weekdays: [1, 2, 3, 4, 5], timezone: tz },
     update: {},
   });
+  await db.schedule.upsert({
+    where: { workspaceId_key: { workspaceId: ws, key: 'cs_medewerker' } },
+    create: { workspaceId: ws, key: 'cs_medewerker', kind: 'task', label: 'CS Medewerker', timeOfDay: '00:00', weekdays: [1, 2, 3, 4, 5, 6, 7], timezone: tz },
+    update: {},
+  });
 
   // ---- Kennis ----
   const kdir = opts.knowledgeDir;

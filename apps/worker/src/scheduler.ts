@@ -5,6 +5,7 @@ import { computeDueFiring, MEETING_KIND_BY_KEY } from '@jc/domain';
 import type { WorkerDeps } from './deps';
 import { meetingTitle, startMeeting } from './meetings';
 import { fireCmvaHour } from './cmva-schedule';
+import { fireCsSlot } from './cs-schedule';
 
 export async function runSchedulerTick(deps: WorkerDeps, now = new Date()) {
   const { db } = deps;
@@ -13,6 +14,10 @@ export async function runSchedulerTick(deps: WorkerDeps, now = new Date()) {
   for (const s of schedules) {
     if (s.key === 'cmva_sync') {
       if (await fireCmvaHour(db, s.workspaceId, s.id, now)) fired.push(s.key);
+      continue;
+    }
+    if (s.key === 'cs_medewerker') {
+      if (await fireCsSlot(db, s.workspaceId, s.id, now)) fired.push(s.key);
       continue;
     }
     const last = await db.scheduleFiring.findFirst({ where: { scheduleId: s.id }, orderBy: { plannedAt: 'desc' } });

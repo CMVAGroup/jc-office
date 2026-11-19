@@ -1,6 +1,6 @@
 // Deterministische mockadapter: bouwt schema-geldige uitvoer uitsluitend uit de aangeleverde data.
 // Bedoeld voor de demo en tests. Iedere uitvoer is gelabeld als demo/mock.
-import { formatMinor, ROLE_LABELS, type AgentRole, type MeetingSynthesis, type MorningBrief, type SchemaName, type TaskResult } from '@jc/domain';
+import { formatMinor, ROLE_LABELS, type AgentRole, type CsDraft, type CsReview, type MeetingSynthesis, type MorningBrief, type SchemaName, type TaskResult } from '@jc/domain';
 
 export interface MetricView {
   snapshotId: string;
@@ -182,6 +182,27 @@ function mockMeeting(input: MeetingInput): MeetingSynthesis {
   };
 }
 
+function mockCsDraft(input: unknown): CsDraft {
+  const i = input as { ticketId: string; subject: string; body: string };
+  return {
+    ticketId: i.ticketId ?? 'mock-ticket',
+    subject: i.subject ?? 'Your order',
+    draftBody: `Dear Customer,\n\nThank you for reaching out to Julie & Claire. We have received your message regarding "${i.subject ?? 'your inquiry'}" and will look into this for you right away.\n\nKind regards,\nEmily · Customer Care`,
+    tone: 'empathetic',
+    reasoning: 'Mock: standard acknowledgement reply.',
+  };
+}
+
+function mockCsReview(input: unknown): CsReview {
+  const i = input as { ticketId: string; draftBody: string };
+  return {
+    ticketId: i.ticketId ?? 'mock-ticket',
+    improvedBody: i.draftBody ?? '',
+    changes: 'Mock: no changes needed.',
+    approved: true,
+  };
+}
+
 export function mockGenerate(schemaName: SchemaName, input: unknown): unknown {
   switch (schemaName) {
     case 'analyst_report':
@@ -190,5 +211,9 @@ export function mockGenerate(schemaName: SchemaName, input: unknown): unknown {
       return mockLead(input as LeadInput);
     case 'meeting_synthesis':
       return mockMeeting(input as MeetingInput);
+    case 'cs_draft':
+      return mockCsDraft(input);
+    case 'cs_review':
+      return mockCsReview(input);
   }
 }

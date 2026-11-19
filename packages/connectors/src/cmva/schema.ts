@@ -56,3 +56,17 @@ export const CmvaSummarySchema = z.object({
 export type CmvaSummary = z.infer<typeof CmvaSummarySchema>;
 // Endpoint has no version field. Pin the reviewed route contract, not the data's freshness.
 export const CMVA_SOURCE_VERSION = 'ai-summary:27492f218a3e07193a0db43d5ad8e6d9baf31149';
+
+export const CmvaInboxTicketSchema = z.object({
+  id: z.string().min(1),
+  inbound_message_id: z.string().min(1),
+  subject: z.string(),
+  body: z.string(),
+  created_at: z.string(),
+});
+export type CmvaInboxTicket = z.infer<typeof CmvaInboxTicketSchema>;
+
+export const CmvaInboxSchema = z.object({
+  tickets: z.array(CmvaInboxTicketSchema),
+});
+export type CmvaInbox = z.infer<typeof CmvaInboxSchema>;

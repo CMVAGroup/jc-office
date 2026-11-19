@@ -58,7 +58,7 @@ export function allowedFrom(to: TaskStatus): TaskStatus[] {
   return TASK_STATUSES.filter((s) => TRANSITIONS[s].includes(to));
 }
 
-export type TaskType = 'cmva_sync' | 'morning_brief' | 'commerce_analysis' | 'meeting_demo' | 'demo_stall' | 'demo_rate_limit';
+export type TaskType = 'cmva_sync' | 'morning_brief' | 'commerce_analysis' | 'meeting_demo' | 'demo_stall' | 'demo_rate_limit' | 'cs_medewerker' | 'cs_draft' | 'cs_review';
 
 /** Verwacht voortgangsvenster per taaktype (watchdog). Lange imports mogen ruimer. */
 export interface TaskTimingPolicy {
@@ -79,6 +79,9 @@ export const TASK_TIMING: Record<TaskType, TaskTimingPolicy> = {
   meeting_demo: { progressWindowSec: 60, heartbeatTimeoutSec: 45, queueMaxAgeSec: 300, leaseSec: 60 },
   demo_stall: { progressWindowSec: 30, heartbeatTimeoutSec: 45, queueMaxAgeSec: 300, leaseSec: 60 },
   demo_rate_limit: { progressWindowSec: 30, heartbeatTimeoutSec: 45, queueMaxAgeSec: 300, leaseSec: 60 },
+  cs_medewerker: { progressWindowSec: 120, heartbeatTimeoutSec: 45, queueMaxAgeSec: 300, leaseSec: 60 },
+  cs_draft: { progressWindowSec: 120, heartbeatTimeoutSec: 45, queueMaxAgeSec: 300, leaseSec: 60 },
+  cs_review: { progressWindowSec: 120, heartbeatTimeoutSec: 45, queueMaxAgeSec: 300, leaseSec: 60 },
 };
 
 export function timingFor(type: string): TaskTimingPolicy {
